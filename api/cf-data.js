@@ -1,6 +1,23 @@
+const RATE_LIMIT = new Map();
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const max = 20;
+  const entry = RATE_LIMIT.get(ip) || { count: 0, start: now };
+  if (now - entry.start > windowMs) { RATE_LIMIT.set(ip, { count: 1, start: now }); return true; }
+  if (entry.count >= max) return false;
+  entry.count++;
+  RATE_LIMIT.set(ip, entry);
+  return true;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://chronocart.xyz');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
+
+  const ip = req.headers['x-forwarded-for'] || 'unknown';
+  if (!checkRateLimit(ip)) return res.status(429).json({ error: 'Too many requests' });
 
   const { id, sig, username } = req.query;
   if (!id || !sig) return res.status(400).json({ error: 'Missing params' });
@@ -16,11 +33,11 @@ export default async function handler(req, res) {
   } catch { return res.status(401).json({ error: 'Verification failed' }); }
 
   const RETAILERS = [
-    { name: 'Target', url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ9fJdY9cCJET97X0vzM1ART-t8jLotFXMakM_zQF9byL17VWycf_0ZKbcaazn5LL1i2UccWh0YHn_h/pub?output=csv' },
-    { name: 'Costco', url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ3wcryPD4M4xXJRUD6lt_Y867wzBHycsbFwP2HMxC8U9eu0VFUTWE_xYQAn8TKa2WmdIdmTP_aoxI4/pub?output=csv' },
-    { name: "Sam's Club", url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRskIWk9E2kUYZonlAwTXthgKoGJ4a3rTyhAEI4rkQ7dBW5yc1PfoTm2AgKLQG5eqmIndEptlJ1my22/pub?output=csv' },
-    { name: 'Walmart', url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQF4PsT7-R3ROn2osAj91e1A2UbfL7nFolYbTQ1SS42_ahjR-MhjiAO22L4AkfpoCbY-OvePrFnafxl/pub?output=csv' },
-    { name: 'Pokemon Center', url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTRDglOhfTV9fNy6hnuIwVvnKXkWtwvcMHi-o3Ldg7IrfSSNTCnBa8wZ-Tk_RZS-lfM5QIVPDuGrK93/pub?output=csv' },
+    { name: 'Target', url: process.env.SHEET_TARGET },
+    { name: 'Costco', url: process.env.SHEET_COSTCO },
+    { name: "Sam's Club", url: process.env.SHEET_SAMS },
+    { name: 'Walmart', url: process.env.SHEET_WALMART },
+    { name: 'Pokemon Center', url: process.env.SHEET_PKC },
   ];
 
   function parseCSVFull(text) {
@@ -59,12 +76,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    const retailerTexts = await Promise.all(RETAILERS.map(r => fetch(r.url).then(res => res.text())));
-    const submissions = retailerTexts.map((text, i) => {
-      const rows = parseCSV(text);
-      return filterByUser(rows, id).map(row => ({ _retailer: RETAILERS[i].name, ...row }));
-    }).flat();
-
+    const retailerTexts = await Promise.all(RETAILERS.map(r => fetch(r.url).then(r2 => r2.text())));
+    const submissions = retailerTexts.map((text, i) =>
+      filterByUser(parseCSV(text), id).map(row => ({ _retailer: RETAILERS[i].name, ...row }))
+    ).flat();
     res.status(200).json({ submissions });
   } catch (err) {
     console.error(err);
