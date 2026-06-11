@@ -27,24 +27,17 @@ export default async function handler(req, res) {
     );
     const member = await memberRes.json();
 
-    const isPaidMember = member.roles && member.roles.includes(process.env.PAID_MEMBER_ROLE_ID);
-
-    const plan = member.roles
-      ? member.roles.includes('1477543709062070442') ? 'Premium'
-        : member.roles.includes('1478145670769676463') ? 'Base'
-        : member.roles.includes('1500674583819452447') ? 'Starter'
-        : 'Starter'
-      : 'Starter';
+    const isAutocheckout = member.roles && member.roles.includes('1422912777428664431');
 
     const params = new URLSearchParams({
       id: user.id,
       username: user.username,
       avatar: user.avatar || '',
-      paid: isPaidMember ? '1' : '0',
-      plan,
+      paid: isAutocheckout ? '1' : '0',
+      plan: 'Autocheckout',
     });
 
-    res.redirect(`${process.env.FRONTEND_URL}/dashboard.html?${params}`);
+    res.redirect(`${process.env.FRONTEND_URL}/collectify-dashboard.html?${params}`);
   } catch (err) {
     console.error(err);
     res.redirect(`${process.env.FRONTEND_URL}?error=server_error`);
