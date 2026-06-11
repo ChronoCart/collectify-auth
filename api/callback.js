@@ -29,12 +29,24 @@ export default async function handler(req, res) {
 
     const isAutocheckout = member.roles && member.roles.includes('1422912777428664431');
 
+    // Generate HMAC signature to prevent session spoofing
+    const secret = process.env.TOKEN_SECRET || 'fallback_secret';
+    const payload = `${user.id}:${user.username}`;
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(secret);
+    const msgData = encoder.encode(payload);
+    const cryptoKey = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sigBuffer = await crypto.subtle.sign('HMAC', cryptoKey, msgData);
+    const sigArray = Array.from(new Uint8Array(sigBuffer));
+    const sig = sigArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
     const params = new URLSearchParams({
       id: user.id,
       username: user.username,
       avatar: user.avatar || '',
       paid: isAutocheckout ? '1' : '0',
       plan: 'Autocheckout',
+      sig,
     });
 
     res.redirect(`${process.env.FRONTEND_URL}/collectify-dashboard.html?${params}`);
