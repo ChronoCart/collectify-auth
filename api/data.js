@@ -1,5 +1,4 @@
 const RATE_LIMIT = new Map();
-
 function checkRateLimit(ip) {
   const now = Date.now();
   const windowMs = 60 * 1000;
@@ -15,13 +14,10 @@ function checkRateLimit(ip) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://chronocart.xyz');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
-
   const ip = req.headers['x-forwarded-for'] || 'unknown';
   if (!checkRateLimit(ip)) return res.status(429).json({ error: 'Too many requests' });
-
   const { id, sig, username } = req.query;
   if (!id || !sig) return res.status(400).json({ error: 'Missing params' });
-
   try {
     const secret = process.env.TOKEN_SECRET;
     const payload = `${id}:${username || ''}`;
@@ -33,10 +29,10 @@ export default async function handler(req, res) {
   } catch { return res.status(401).json({ error: 'Verification failed' }); }
 
   const RETAILERS = [
-    { name: 'Target', url: process.env.SHEET_TARGET },
-    { name: 'Costco', url: process.env.SHEET_COSTCO },
-    { name: "Sam's Club", url: process.env.SHEET_SAMS },
-    { name: 'Walmart', url: process.env.SHEET_WALMART },
+    { name: 'Target',         url: process.env.SHEET_TARGET },
+    { name: 'Costco',         url: process.env.SHEET_COSTCO },
+    { name: "Sam's Club",     url: process.env.SHEET_SAMS },
+    { name: 'Walmart',        url: process.env.SHEET_WALMART },
     { name: 'Pokemon Center', url: process.env.SHEET_PKC },
   ];
 
@@ -75,12 +71,32 @@ export default async function handler(req, res) {
     });
   }
 
+  // Fetch checkouts from local bot — fail silently if bot is offline
+  async function fetchCheckouts(discordId) {
+    try {
+      const botUrl = process.env.CHECKOUT_BOT_URL;
+      const botSecret = process.env.CHECKOUT_BOT_SECRET;
+      if (!botUrl || !botSecret) return [];
+      const r = await fetch(
+        `${botUrl}/checkouts?id=${encodeURIComponent(discordId)}&secret=${encodeURIComponent(botSecret)}`,
+        { signal: AbortSignal.timeout(4000) }
+      );
+      if (!r.ok) return [];
+      return await r.json();
+    } catch {
+      return [];
+    }
+  }
+
   try {
     const retailerTexts = await Promise.all(RETAILERS.map(r => fetch(r.url).then(r2 => r2.text())));
     const submissions = retailerTexts.map((text, i) =>
       filterByUser(parseCSV(text), id).map(row => ({ _retailer: RETAILERS[i].name, ...row }))
     ).flat();
-    res.status(200).json({ submissions });
+
+    const checkouts = await fetchCheckouts(id);
+
+    res.status(200).json({ submissions, checkouts });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch data' });
