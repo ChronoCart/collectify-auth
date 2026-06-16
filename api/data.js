@@ -71,7 +71,6 @@ export default async function handler(req, res) {
     });
   }
 
-  // Fetch checkouts from local bot — fail silently if bot is offline
   async function fetchCheckouts(discordId) {
     try {
       const botUrl = process.env.CHECKOUT_BOT_URL;
@@ -83,20 +82,60 @@ export default async function handler(req, res) {
       );
       if (!r.ok) return [];
       return await r.json();
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   }
 
+  // Normalize retailer name for matching (handles PKC, PokemonCenter, Pokemon Center etc)
+  function normalizeRetailer(name) {
+    return (name || '').toLowerCase().replace(/[^a-z]/g, '');
+  }
+
+  const RETAILER_NORMALIZE = {
+    'target': 'Target',
+    'walmart': 'Walmart',
+    'costco': 'Costco',
+    'samsclub': "Sam's Club",
+    'pokemoncenter': 'Pokemon Center',
+    'pkc': 'Pokemon Center',
+    'tgt': 'Target',
+    'wmt': 'Walmart',
+    'cst': 'Costco',
+    'sam': "Sam's Club",
+  };
+
   try {
-    const retailerTexts = await Promise.all(RETAILERS.map(r => fetch(r.url).then(r2 => r2.text())));
+    const [membersText, ...retailerTexts] = await Promise.all([
+      process.env.CF_SHEET_MEMBERS
+        ? fetch(process.env.CF_SHEET_MEMBERS).then(r => r.text()).catch(() => '')
+        : Promise.resolve(''),
+      ...RETAILERS.map(r => fetch(r.url).then(r2 => r2.text())),
+    ]);
+
     const submissions = retailerTexts.map((text, i) =>
       filterByUser(parseCSV(text), id).map(row => ({ _retailer: RETAILERS[i].name, ...row }))
     ).flat();
 
+    // Build bonus slots map: { 'Target': 2, 'Pokemon Center': 1, ... }
+    const bonusSlots = {};
+    if (membersText) {
+      const memberRows = parseCSV(membersText);
+      // Find all rows for this Discord ID
+      memberRows
+        .filter(row => String(row['Discord ID'] || '').trim() === id)
+        .forEach(row => {
+          const rawRetailer = (row['Retailer'] || '').trim();
+          const normalized = normalizeRetailer(rawRetailer);
+          const retailerName = RETAILER_NORMALIZE[normalized] || rawRetailer;
+          const slots = parseInt(row['Bonus Slots'] || '0', 10) || 0;
+          if (retailerName && slots > 0) {
+            bonusSlots[retailerName] = (bonusSlots[retailerName] || 0) + slots;
+          }
+        });
+    }
+
     const checkouts = await fetchCheckouts(id);
 
-    res.status(200).json({ submissions, checkouts });
+    res.status(200).json({ submissions, checkouts, bonusSlots });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch data' });
