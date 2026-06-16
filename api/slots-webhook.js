@@ -9,6 +9,21 @@ async function getRawBody(req) {
   });
 }
 
+// Map short codes back to full retailer names
+const RETAILER_MAP = {
+  'TGT': 'Target',
+  'WMT': 'Walmart',
+  'CST': 'Costco',
+  'SAM': "Sam's Club",
+  'PKC': 'Pokemon Center',
+  // Also handle full names in case they come through
+  'Target': 'Target',
+  'Walmart': 'Walmart',
+  'Costco': 'Costco',
+  'PokemonCenter': 'Pokemon Center',
+  'SamsClub': "Sam's Club",
+};
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
@@ -16,24 +31,22 @@ export default async function handler(req, res) {
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_SLOTS_WEBHOOK_SECRET;
 
-  // Verify Stripe signature
   let event;
   try {
-    // Manual HMAC verification without stripe SDK
     const crypto = await import('crypto');
-    const [, timestampPart, v1Part] = sig.split(',').reduce((acc, part) => {
-      const [key, val] = part.split('=');
-      acc[key === 't' ? 1 : key === 'v1' ? 2 : 0] = val;
+    const parts = sig.split(',').reduce((acc, part) => {
+      const [k, v] = part.split('=');
+      acc[k] = v;
       return acc;
-    }, [null, null, null]);
+    }, {});
 
-    const signedPayload = `${timestampPart}.${rawBody.toString()}`;
+    const signedPayload = `${parts.t}.${rawBody.toString()}`;
     const expectedSig = crypto.default
       .createHmac('sha256', webhookSecret)
       .update(signedPayload)
       .digest('hex');
 
-    if (expectedSig !== v1Part) {
+    if (expectedSig !== parts.v1) {
       return res.status(400).json({ error: 'Invalid signature' });
     }
 
@@ -49,23 +62,26 @@ export default async function handler(req, res) {
 
   const session = event.data.object;
 
-  // Get Discord ID from client_reference_id (passed via Payment Link URL param)
-  const discordId = session.client_reference_id;
-  const email = session.customer_details?.email || '';
-  const username = session.customer_details?.name || '';
+  // client_reference_id format: DISCORDID_SHORTCODE
+  // e.g. 700203316281475082_PKC
+  const ref = session.client_reference_id || '';
+  const underscoreIdx = ref.indexOf('_');
 
-  if (!discordId) {
-    console.error('No Discord ID in client_reference_id — cannot credit slots');
-    return res.status(200).json({ received: true, warning: 'No discordId' });
+  if (underscoreIdx === -1) {
+    console.error('Invalid client_reference_id format:', ref);
+    return res.status(200).json({ received: true, warning: 'Invalid ref format' });
   }
 
-  // Calculate slots purchased (1 slot per $10)
+  const discordId = ref.slice(0, underscoreIdx);
+  const retailerRaw = ref.slice(underscoreIdx + 1);
+  const retailer = RETAILER_MAP[retailerRaw] || retailerRaw;
+  const username = session.customer_details?.name || '';
+
   const amountPaid = session.amount_total || 0;
-  const slotsToAdd = Math.max(1, Math.floor(amountPaid / 1000)); // $10 = 1000 cents = 1 slot
+  const slotsToAdd = Math.max(1, Math.floor(amountPaid / 1000));
 
-  console.log(`💰 [SLOTS] ${discordId} purchased ${slotsToAdd} slot(s) — $${amountPaid / 100}`);
+  console.log(`💰 [SLOTS] ${discordId} bought ${slotsToAdd} slot(s) for ${retailer} (raw: ${retailerRaw})`);
 
-  // Call Apps Script to update the sheet
   try {
     const scriptUrl = process.env.CF_MEMBERS_SCRIPT_URL;
     if (!scriptUrl) throw new Error('CF_MEMBERS_SCRIPT_URL not set');
@@ -73,7 +89,7 @@ export default async function handler(req, res) {
     const response = await fetch(scriptUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ discordId, username, slots: slotsToAdd }),
+      body: JSON.stringify({ discordId, username, retailer, slots: slotsToAdd }),
       redirect: 'follow',
     });
 
