@@ -1,139 +1,122 @@
+// ── Collectify Extra Slot Webhook  (collectify-auth.vercel.app/api/slots-webhook)
+//
+// Stripe sends checkout.session.completed after a slot purchase.
+// client_reference_id format: "{discordUserId}_{retailerShort}"
+//   e.g.  "1234567890123456789_TGT"
+//
+// This handler parses BOTH parts and tells the Apps Script which retailer
+// got the slot, so the sheet records it correctly per-retailer.
+//
+// ENV VARS needed on Vercel:
+//   STRIPE_SLOTS_WEBHOOK_SECRET=whsec_...   (from Stripe Webhooks dashboard)
+//   CF_MEMBERS_SCRIPT_URL=https://script.google.com/macros/s/.../exec
+
+import Stripe from 'stripe';
+
+// Short code → full retailer name (must match RETAILERS in collectify-dashboard.html)
+const RETAILER_SHORT_MAP = {
+  TGT: 'Target',
+  WMT: 'Walmart',
+  PKC: 'Pokemon Center',
+  SAM: "Sam's Club",
+  CST: 'Costco',
+};
+
 export const config = { api: { bodyParser: false } };
 
 async function getRawBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', chunk => chunks.push(chunk));
+    req.on('data', c => chunks.push(c));
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }
 
-// Map short codes (and any variant we've seen) back to a canonical retailer name
-const RETAILER_MAP = {
-  'TGT': 'Target',
-  'WMT': 'Walmart',
-  'CST': 'Costco',
-  'SAM': "Sam's Club",
-  'PKC': 'Pokemon Center',
-  'Target': 'Target',
-  'Walmart': 'Walmart',
-  'Costco': 'Costco',
-  'PokemonCenter': 'Pokemon Center',
-  'Pokemon Center': 'Pokemon Center',
-  'SamsClub': "Sam's Club",
-  'Sams Club': "Sam's Club",
-  "Sam's Club": "Sam's Club",
-};
-
-function resolveRetailer(raw) {
-  if (!raw) return null;
-  const trimmed = raw.trim();
-  // Direct match first
-  if (RETAILER_MAP[trimmed]) return RETAILER_MAP[trimmed];
-  // Normalize and try again (strip spaces/apostrophes/case)
-  const normalized = trimmed.toLowerCase().replace(/[^a-z]/g, '');
-  const NORMALIZED_MAP = {
-    'tgt': 'Target',
-    'wmt': 'Walmart',
-    'cst': 'Costco',
-    'sam': "Sam's Club",
-    'pkc': 'Pokemon Center',
-    'target': 'Target',
-    'walmart': 'Walmart',
-    'costco': 'Costco',
-    'pokemoncenter': 'Pokemon Center',
-    'samsclub': "Sam's Club",
-  };
-  return NORMALIZED_MAP[normalized] || null;
-}
-
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).end();
+  if (req.method !== 'POST') return res.status(405).end('Method Not Allowed');
 
-  const rawBody = await getRawBody(req);
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_SLOTS_WEBHOOK_SECRET;
+  if (!webhookSecret) return res.status(500).json({ error: 'Missing STRIPE_SLOTS_WEBHOOK_SECRET' });
 
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' });
   let event;
   try {
-    const crypto = await import('crypto');
-    const parts = sig.split(',').reduce((acc, part) => {
-      const [k, v] = part.split('=');
-      acc[k] = v;
-      return acc;
-    }, {});
-
-    const signedPayload = `${parts.t}.${rawBody.toString()}`;
-    const expectedSig = crypto.default
-      .createHmac('sha256', webhookSecret)
-      .update(signedPayload)
-      .digest('hex');
-
-    if (expectedSig !== parts.v1) {
-      return res.status(400).json({ error: 'Invalid signature' });
-    }
-
-    event = JSON.parse(rawBody.toString());
+    const rawBody = await getRawBody(req);
+    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
   } catch (err) {
-    console.error('Webhook verification failed:', err.message);
-    return res.status(400).json({ error: 'Webhook error' });
+    console.error('Webhook signature failed:', err.message);
+    return res.status(400).json({ error: `Webhook Error: ${err.message}` });
   }
 
   if (event.type !== 'checkout.session.completed') {
-    return res.status(200).json({ received: true });
+    return res.status(200).json({ received: true, skipped: true });
   }
 
   const session = event.data.object;
+  const clientRef = session.client_reference_id || '';
 
-  // client_reference_id format: DISCORDID_SHORTCODE (e.g. 1234567890_PKC)
-  const ref = session.client_reference_id || '';
-  const underscoreIdx = ref.indexOf('_');
-
-  if (underscoreIdx === -1) {
-    console.error(`❌ [SLOTS] Invalid client_reference_id format: "${ref}" — session ${session.id}`);
-    return res.status(200).json({ received: true, warning: 'Invalid ref format' });
+  // ── Parse "userId_retailerShort" ─────────────────────────────────────────
+  // Split on the LAST underscore so Discord IDs (which don't contain _) are safe,
+  // but short codes (TGT, WMT, etc.) are never confused with user IDs.
+  const lastUnderscore = clientRef.lastIndexOf('_');
+  if (lastUnderscore === -1) {
+    console.error('slots-webhook: client_reference_id missing underscore —', clientRef);
+    return res.status(200).json({ received: true, error: 'bad_client_reference_id' });
   }
 
-  const discordId = ref.slice(0, underscoreIdx).trim();
-  const retailerRaw = ref.slice(underscoreIdx + 1).trim();
-  const retailer = resolveRetailer(retailerRaw);
+  const discordUserId = clientRef.slice(0, lastUnderscore);
+  const retailerShort = clientRef.slice(lastUnderscore + 1);
+  const retailerName  = RETAILER_SHORT_MAP[retailerShort];
 
-  if (!retailer) {
-    // CRITICAL: never silently write a blank retailer to the sheet.
-    // Log loudly so this purchase can be manually fixed, and bail out
-    // instead of sending an empty/garbage retailer value downstream.
-    console.error(
-      `❌ [SLOTS] Could not resolve retailer from raw value "${retailerRaw}" ` +
-      `(full ref: "${ref}", discordId: ${discordId}, session: ${session.id}). ` +
-      `Customer: ${session.customer_details?.email || 'unknown'}. ` +
-      `MANUAL FIX NEEDED — check Stripe session for correct retailer.`
-    );
-    return res.status(200).json({ received: true, error: 'Unresolved retailer', ref });
+  if (!discordUserId) {
+    console.error('slots-webhook: could not extract discordUserId from', clientRef);
+    return res.status(200).json({ received: true, error: 'missing_discord_id' });
+  }
+  if (!retailerName) {
+    console.error(`slots-webhook: unknown retailer short code "${retailerShort}" from`, clientRef);
+    return res.status(200).json({ received: true, error: 'unknown_retailer' });
   }
 
-  const username = session.customer_details?.name || '';
-  const amountPaid = session.amount_total || 0;
-  const slotsToAdd = Math.max(1, Math.floor(amountPaid / 1000));
+  const customerEmail = session.customer_details?.email || '';
+  const amountPaid    = (session.amount_total || 0) / 100; // cents → dollars
+  const sessionId     = session.id;
 
-  console.log(`💰 [SLOTS] ${discordId} bought ${slotsToAdd} slot(s) for ${retailer} (raw: ${retailerRaw})`);
+  console.log(`slots-webhook: user=${discordUserId} retailer=${retailerName} amount=$${amountPaid} session=${sessionId}`);
+
+  // ── Notify Apps Script ────────────────────────────────────────────────────
+  const scriptUrl = process.env.CF_MEMBERS_SCRIPT_URL;
+  if (!scriptUrl) {
+    console.error('slots-webhook: CF_MEMBERS_SCRIPT_URL not set');
+    return res.status(500).json({ error: 'CF_MEMBERS_SCRIPT_URL missing' });
+  }
 
   try {
-    const scriptUrl = process.env.CF_MEMBERS_SCRIPT_URL;
-    if (!scriptUrl) throw new Error('CF_MEMBERS_SCRIPT_URL not set');
-
-    const response = await fetch(scriptUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ discordId, username, retailer, slots: slotsToAdd }),
-      redirect: 'follow',
+    const params = new URLSearchParams({
+      action:        'add_slot',
+      discord_id:    discordUserId,
+      retailer:      retailerName,      // ← THE FIX: now passes full retailer name
+      retailer_short: retailerShort,
+      email:         customerEmail,
+      amount:        String(amountPaid),
+      session_id:    sessionId,
     });
 
-    const result = await response.json();
-    console.log(`✅ [SLOTS] Sheet updated:`, result);
-  } catch (err) {
-    console.error(`❌ [SLOTS] Failed to update sheet for ${discordId} / ${retailer}:`, err.message);
-  }
+    const scriptResp = await fetch(`${scriptUrl}?${params}`, { method: 'GET' });
+    const scriptText = await scriptResp.text();
+    let scriptJson = {};
+    try { scriptJson = JSON.parse(scriptText); } catch {}
 
-  res.status(200).json({ received: true });
+    if (!scriptJson.ok) {
+      console.error('slots-webhook: Apps Script returned error —', scriptText);
+      return res.status(200).json({ received: true, script_error: scriptText });
+    }
+
+    console.log(`slots-webhook: ✅ slot credited — ${retailerName} for ${discordUserId}`);
+    return res.status(200).json({ received: true, ok: true, retailer: retailerName });
+  } catch (err) {
+    console.error('slots-webhook: fetch to Apps Script failed —', err.message);
+    return res.status(200).json({ received: true, script_fetch_error: err.message });
+  }
 }
