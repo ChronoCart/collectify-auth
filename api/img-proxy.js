@@ -1,29 +1,30 @@
 // api/img-proxy.js
-// Proxies product images that block cross-origin canvas access (PKC, etc.)
-// Usage: /api/img-proxy?url=https://images.pokemoncenter.com/...
+// Proxies product images for canvas cross-origin access
+// Accepts any public HTTPS image URL — blocks private/local IPs (SSRF protection)
 
 export default async function handler(req, res) {
   const { url } = req.query;
-
   if (!url) { res.status(400).json({ error: 'Missing url param' }); return; }
 
-  // Only proxy known image CDNs — don't become an open proxy
-  const allowed = [
-    'images.pokemoncenter.com',
-    'assets.pokemon.com',
-    'target.scene7.com',
-    'assets.target.com',
-    'i5.walmartimages.com',
-    'scene7.com',
-  ];
-  const isAllowed = allowed.some(domain => url.includes(domain));
-  if (!isAllowed) { res.status(403).json({ error: 'Domain not allowed' }); return; }
+  // Must be HTTPS
+  if (!url.startsWith('https://')) {
+    res.status(403).json({ error: 'Only HTTPS URLs allowed' }); return;
+  }
+
+  // Block private/local IP ranges (SSRF protection)
+  let hostname;
+  try { hostname = new URL(url).hostname; } catch {
+    res.status(400).json({ error: 'Invalid URL' }); return;
+  }
+  const blocked = ['localhost','127.','10.','192.168.','172.16.','169.254.','::1'];
+  if (blocked.some(b => hostname.startsWith(b) || hostname === b)) {
+    res.status(403).json({ error: 'Private addresses not allowed' }); return;
+  }
 
   try {
     const upstream = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ChronoCartBot/1.0)' }
     });
-
     if (!upstream.ok) { res.status(upstream.status).end(); return; }
 
     const contentType = upstream.headers.get('content-type') || 'image/jpeg';
