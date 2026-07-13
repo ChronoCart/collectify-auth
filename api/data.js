@@ -29,10 +29,10 @@ export default async function handler(req, res) {
   } catch { return res.status(401).json({ error: 'Verification failed' }); }
 
   const RETAILERS = [
-    { name: 'Target',         url: process.env.SHEET_TARGET },
-    { name: 'Costco',         url: process.env.SHEET_COSTCO },
-    { name: "Sam's Club",     url: process.env.SHEET_SAMS },
-    { name: 'Walmart',        url: process.env.SHEET_WALMART },
+    { name: 'Target', url: process.env.SHEET_TARGET },
+    { name: 'Costco', url: process.env.SHEET_COSTCO },
+    { name: "Sam's Club", url: process.env.SHEET_SAMS },
+    { name: 'Walmart', url: process.env.SHEET_WALMART },
     { name: 'Pokemon Center', url: process.env.SHEET_PKC },
   ];
 
@@ -85,6 +85,25 @@ export default async function handler(req, res) {
     } catch { return []; }
   }
 
+  // Bonus slots the bot auto-credited from VERIFIED Stripe payments. The bot is the source of
+  // truth now — every "Buy Extra Slot" checkout is watched, matched to the member+retailer via
+  // the payment's client_reference_id, and banked in the bot DB. Same secret the checkouts call
+  // uses; the bot's /bonus-slots route is behind the same secret gate.
+  async function fetchBonusSlots(discordId) {
+    try {
+      const botUrl = process.env.CHECKOUT_BOT_URL;
+      const botSecret = process.env.CHECKOUT_BOT_SECRET;
+      if (!botUrl || !botSecret) return {};
+      const r = await fetch(
+        `${botUrl}/bonus-slots?id=${encodeURIComponent(discordId)}&secret=${encodeURIComponent(botSecret)}`,
+        { signal: AbortSignal.timeout(4000) }
+      );
+      if (!r.ok) return {};
+      const j = await r.json();
+      return (j && j.bonusSlots) || {};
+    } catch { return {}; }
+  }
+
   // Normalize retailer name for matching (handles PKC, PokemonCenter, Pokemon Center etc)
   function normalizeRetailer(name) {
     return (name || '').toLowerCase().replace(/[^a-z]/g, '');
@@ -115,11 +134,11 @@ export default async function handler(req, res) {
       filterByUser(parseCSV(text), id).map(row => ({ _retailer: RETAILERS[i].name, ...row }))
     ).flat();
 
-    // Build bonus slots map: { 'Target': 2, 'Pokemon Center': 1, ... }
+    // Build bonus slots map from the LEGACY members sheet: { 'Target': 2, ... }
+    // This is now a manual fallback only — see the bot merge below.
     const bonusSlots = {};
     if (membersText) {
       const memberRows = parseCSV(membersText);
-      // Find all rows for this Discord ID
       memberRows
         .filter(row => String(row['Discord ID'] || '').trim() === id)
         .forEach(row => {
@@ -131,6 +150,14 @@ export default async function handler(req, res) {
             bonusSlots[retailerName] = (bonusSlots[retailerName] || 0) + slots;
           }
         });
+    }
+
+    // The bot (auto-credited from verified Stripe payments) is authoritative. It WINS per
+    // retailer over the legacy sheet, so a purchase is never double-counted against a stale
+    // manual row. A retailer that only exists in the sheet still shows (manual grants survive).
+    const botBonus = await fetchBonusSlots(id);
+    for (const [retailer, n] of Object.entries(botBonus)) {
+      if (n > 0) bonusSlots[retailer] = n;
     }
 
     const checkouts = await fetchCheckouts(id);
