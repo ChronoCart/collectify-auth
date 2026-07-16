@@ -95,7 +95,7 @@ export default async function handler(req, res) {
       const botSecret = process.env.CHECKOUT_BOT_SECRET;
       if (!botUrl || !botSecret) return {};
       const r = await fetch(
-        `${botUrl}/bonus-slots?id=${encodeURIComponent(discordId)}&secret=${encodeURIComponent(botSecret)}`,
+        `${botUrl}/submissions?id=${encodeURIComponent(discordId)}&secret=${encodeURIComponent(botSecret)}`,
         { signal: AbortSignal.timeout(4000) }
       );
       if (!r.ok) return {};
