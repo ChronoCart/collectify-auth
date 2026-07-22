@@ -28,6 +28,26 @@ export default async function handler(req, res) {
     if (!valid) return res.status(401).json({ error: 'Invalid signature' });
   } catch { return res.status(401).json({ error: 'Verification failed' }); }
 
+  // Blacklist gate — a banned member is fully locked out of the Collectify dashboard. The bot
+  // owns the ban list; we ask it before assembling any data. Fail-OPEN on a bot outage: better
+  // to let everyone through briefly than to lock out every paying member if the bot is down.
+  try {
+    const botUrl = process.env.CHECKOUT_BOT_URL;
+    const botSecret = process.env.CHECKOUT_BOT_SECRET;
+    if (botUrl && botSecret) {
+      const br = await fetch(
+        `${botUrl}/blacklist?id=${encodeURIComponent(id)}&secret=${encodeURIComponent(botSecret)}`,
+        { signal: AbortSignal.timeout(4000) }
+      );
+      if (br.ok) {
+        const bj = await br.json();
+        if (bj && bj.blacklisted) {
+          return res.status(403).json({ banned: true, reason: bj.reason || null });
+        }
+      }
+    }
+  } catch { /* fail open — see note above */ }
+
   const RETAILERS = [
     { name: 'Target', url: process.env.SHEET_TARGET },
     { name: 'Costco', url: process.env.SHEET_COSTCO },
@@ -87,8 +107,14 @@ export default async function handler(req, res) {
 
   // Bonus slots the bot auto-credited from VERIFIED Stripe payments. The bot is the source of
   // truth now — every "Buy Extra Slot" checkout is watched, matched to the member+retailer via
-  // the payment's client_reference_id, and banked in the bot DB. Same secret the checkouts call
-  // uses; the bot's /bonus-slots route is behind the same secret gate.
+  // the payment's client_reference_id, and banked in the bot DB.
+  //
+  // ⚠️ MUST read the bot's /submissions route, NOT /bonus-slots. Collectify slots live in the
+  // bot's SEPARATE `collectify_bonus_slots` ledger, and only /submissions returns them
+  // (getCollectifyBonusSlots). /bonus-slots returns the CHRONOCART ledger (getBonusSlots), so
+  // reading it here meant every Collectify slot purchase was credited in the DB but NEVER
+  // surfaced on the dashboard. Both routes are behind the same secret gate and both are on the
+  // bot's proxy allowlist, so this is a drop-in swap.
   async function fetchBonusSlots(discordId) {
     try {
       const botUrl = process.env.CHECKOUT_BOT_URL;
