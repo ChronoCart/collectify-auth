@@ -18,6 +18,8 @@ const ROUTES = {
   'orders-progress': { path: '/orders/progress',  methods: ['GET'],            params: [] },
   'orders-refresh':  { path: '/orders/refresh',   methods: ['POST'],           params: ['rescan', 'days'] },
   'imap-accounts':   { path: '/imap-accounts',    methods: ['GET', 'POST', 'DELETE'], params: ['accountId'] },
+  // Custom Target Requests — GET the member's items; POST {tcin, op:add|remove} in the body.
+  'collectify-custom': { path: '/collectify-custom', methods: ['GET', 'POST'], params: [] },
 };
 
 const RATE_LIMIT = new Map();
@@ -69,7 +71,7 @@ export default async function handler(req, res) {
   for (const p of r.params) if (req.query[p] != null) qs.set(p, String(req.query[p]));
 
   const init = { method: req.method, signal: AbortSignal.timeout(15000) };
-  if (req.method === 'POST' && route === 'imap-accounts') {
+  if (req.method === 'POST' && (route === 'imap-accounts' || route === 'collectify-custom')) {
     init.headers = { 'Content-Type': 'application/json' };
     init.body = JSON.stringify(typeof req.body === 'object' && req.body ? req.body : {});
   }
