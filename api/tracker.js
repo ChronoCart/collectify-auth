@@ -20,6 +20,8 @@ const ROUTES = {
   'imap-accounts':   { path: '/imap-accounts',    methods: ['GET', 'POST', 'DELETE'], params: ['accountId'] },
   // Custom Target Requests — GET the member's items; POST {tcin, op:add|remove} in the body.
   'collectify-custom': { path: '/collectify-custom', methods: ['GET', 'POST'], params: [] },
+  // Requestable Target items catalog (shared tcins board) for the Custom Targets tab.
+  'tcins':           { path: '/tcins',           methods: ['GET'],            params: [] },
 };
 
 const RATE_LIMIT = new Map();
