@@ -14,9 +14,9 @@
 
 // route → { path on the bot, methods we allow, query params we forward }
 const ROUTES = {
-  'faq-quiz-questions': { path: '/faq-quiz/questions', methods: ['GET'],  params: [] },
-  'faq-quiz-status':    { path: '/faq-quiz/status',    methods: ['GET'],  params: [] },
-  'faq-quiz-submit':    { path: '/faq-quiz/submit',    methods: ['POST'], params: [] },
+  'faq-quiz-questions': { path: '/faq-quiz-clfy/questions', methods: ['GET'],  params: [] },
+  'faq-quiz-status':    { path: '/faq-quiz-clfy/status',    methods: ['GET'],  params: [] },
+  'faq-quiz-submit':    { path: '/faq-quiz-clfy/submit',    methods: ['POST'], params: [] },
   'orders':          { path: '/orders',           methods: ['GET'],            params: [] },
   'orders-progress': { path: '/orders/progress',  methods: ['GET'],            params: [] },
   'orders-refresh':  { path: '/orders/refresh',   methods: ['POST'],           params: ['rescan', 'days'] },
