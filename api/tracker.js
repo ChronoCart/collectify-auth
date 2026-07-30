@@ -14,6 +14,9 @@
 
 // route → { path on the bot, methods we allow, query params we forward }
 const ROUTES = {
+  'faq-quiz-questions': { path: '/faq-quiz/questions', methods: ['GET'],  params: [] },
+  'faq-quiz-status':    { path: '/faq-quiz/status',    methods: ['GET'],  params: [] },
+  'faq-quiz-submit':    { path: '/faq-quiz/submit',    methods: ['POST'], params: [] },
   'orders':          { path: '/orders',           methods: ['GET'],            params: [] },
   'orders-progress': { path: '/orders/progress',  methods: ['GET'],            params: [] },
   'orders-refresh':  { path: '/orders/refresh',   methods: ['POST'],           params: ['rescan', 'days'] },
@@ -73,7 +76,7 @@ export default async function handler(req, res) {
   for (const p of r.params) if (req.query[p] != null) qs.set(p, String(req.query[p]));
 
   const init = { method: req.method, signal: AbortSignal.timeout(15000) };
-  if (req.method === 'POST' && (route === 'imap-accounts' || route === 'collectify-custom')) {
+  if (req.method === 'POST' && (route === 'imap-accounts' || route === 'collectify-custom' || route === 'faq-quiz-submit')) {
     init.headers = { 'Content-Type': 'application/json' };
     init.body = JSON.stringify(typeof req.body === 'object' && req.body ? req.body : {});
   }
