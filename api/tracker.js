@@ -25,6 +25,7 @@ const ROUTES = {
   'collectify-custom': { path: '/collectify-custom', methods: ['GET', 'POST'], params: [] },
   // Requestable Target items catalog (shared tcins board) for the Custom Targets tab.
   'tcins':           { path: '/tcins',           methods: ['GET'],            params: [] },
+  'round1-status': { path: '/round1-status', methods: ['GET'], params: [] },
 };
 
 const RATE_LIMIT = new Map();
