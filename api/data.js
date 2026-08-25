@@ -170,7 +170,7 @@ export default async function handler(req, res) {
         const _br = await fetch(`${_botUrl}/submissions?id=${encodeURIComponent(id)}&secret=${encodeURIComponent(_botSecret)}`, { signal: AbortSignal.timeout(4000) });
         if (_br.ok) {
           const _bj = await _br.json();
-          const _NAMES = { bandai: 'Bandai' };
+          const _NAMES = { clfy_bandai: 'Bandai' };
           const _SENSITIVE = /card number|cvv|security code|full card|password/i;
           for (const _row of (_bj.submissions || [])) {
             const _name = _NAMES[String(_row.retailer || '').toLowerCase()];
