@@ -160,6 +160,33 @@ export default async function handler(req, res) {
       filterByUser(parseCSV(text), id).map(row => ({ _retailer: RETAILERS[i].name, ...row }))
     ).flat();
 
+    // ── Bandai (bot-only retailer) ── its sheet holds card data, so it is NOT published as
+    // CSV like the other five. Pull the member's Bandai rows from the bot's PRIVATE /submissions
+    // (authenticated) and merge them in, with card fields stripped before they reach the browser.
+    try {
+      const _botUrl = process.env.CHECKOUT_BOT_URL;
+      const _botSecret = process.env.CHECKOUT_BOT_SECRET;
+      if (_botUrl && _botSecret) {
+        const _br = await fetch(`${_botUrl}/submissions?id=${encodeURIComponent(id)}&secret=${encodeURIComponent(_botSecret)}`, { signal: AbortSignal.timeout(4000) });
+        if (_br.ok) {
+          const _bj = await _br.json();
+          const _NAMES = { bandai: 'Bandai' };
+          const _SENSITIVE = /card number|cvv|security code|full card|password/i;
+          for (const _row of (_bj.submissions || [])) {
+            const _name = _NAMES[String(_row.retailer || '').toLowerCase()];
+            if (!_name) continue;
+            const _clean = {};
+            for (const [_k, _v] of Object.entries(_row)) {
+              if (_k === 'retailer' || _k === 'rowIndex') continue;
+              if (_SENSITIVE.test(_k)) continue;
+              _clean[_k] = _v;
+            }
+            submissions.push({ _retailer: _name, ..._clean });
+          }
+        }
+      }
+    } catch (_e) { /* non-fatal: Bandai just will not show this cycle */ }
+
     // Build bonus slots map from the LEGACY members sheet: { 'Target': 2, ... }
     // This is now a manual fallback only — see the bot merge below.
     const bonusSlots = {};
