@@ -54,6 +54,7 @@ export default async function handler(req, res) {
     { name: "Sam's Club", url: process.env.SHEET_SAMS },
     { name: 'Walmart', url: process.env.SHEET_WALMART },
     { name: 'Pokemon Center', url: process.env.SHEET_PKC },
+    { name: 'Bandai', url: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTRYmq2Mgc9tH8crrWPIarp4qIeReIyUfeRwDo0dWijAPi7M132m6oCsGWKfJSwYDfY6Fq8CY-USv-t/pub?output=csv' },
   ];
 
   function parseCSVFull(text) {
@@ -170,7 +171,7 @@ export default async function handler(req, res) {
         const _br = await fetch(`${_botUrl}/submissions?id=${encodeURIComponent(id)}&secret=${encodeURIComponent(_botSecret)}`, { signal: AbortSignal.timeout(4000) });
         if (_br.ok) {
           const _bj = await _br.json();
-          const _NAMES = { clfy_bandai: 'Bandai' };
+          const _NAMES = { clfy_bandai_OFF: 'Bandai' };
           const _SENSITIVE = /card number|cvv|security code|full card|password/i;
           for (const _row of (_bj.submissions || [])) {
             const _name = _NAMES[String(_row.retailer || '').toLowerCase()];
