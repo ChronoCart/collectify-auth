@@ -86,9 +86,12 @@ export default async function handler(req, res) {
 
   function filterByUser(rows, userId) {
     return rows.filter(row => {
-      const dk = Object.keys(row).find(k => k.toLowerCase().includes('discord'));
-      const m = (row[dk] || '').match(/\d{17,19}/);
-      return dk && m && m[0] === userId;
+      var keys = Object.keys(row);
+    var dk = keys.find(k => k.toLowerCase().includes('discord')) || keys.find(k => k.toLowerCase().includes('profile'));
+    var m = dk ? String(row[dk] || '').match(/\d{17,19}/) : null;
+    if (m && m[0] === userId) return true;
+    for (var i = 0; i < keys.length; i++) { var mm = String(row[keys[i]] || '').match(/\d{17,19}/); if (mm && mm[0] === userId) return true; }
+    return false;
     });
   }
 
