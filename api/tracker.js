@@ -26,6 +26,7 @@ const ROUTES = {
   // Requestable Target items catalog (shared tcins board) for the Custom Targets tab.
   'tcins':           { path: '/tcins',           methods: ['GET'],            params: [] },
   'round1-status': { path: '/round1-status', methods: ['GET'], params: [] },
+  'clfy-acctgen-web': { path: '/clfy-acctgen-web', methods: ['POST'], params: [] },
 };
 
 const RATE_LIMIT = new Map();
@@ -77,7 +78,7 @@ export default async function handler(req, res) {
   for (const p of r.params) if (req.query[p] != null) qs.set(p, String(req.query[p]));
 
   const init = { method: req.method, signal: AbortSignal.timeout(15000) };
-  if (req.method === 'POST' && (route === 'imap-accounts' || route === 'collectify-custom' || route === 'faq-quiz-submit')) {
+  if (req.method === 'POST' && (route === 'imap-accounts' || route === 'collectify-custom' || route === 'faq-quiz-submit' || route === 'clfy-acctgen-web')) {
     init.headers = { 'Content-Type': 'application/json' };
     init.body = JSON.stringify(typeof req.body === 'object' && req.body ? req.body : {});
   }
