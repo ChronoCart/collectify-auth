@@ -24,6 +24,7 @@ const ROUTES = {
   // Custom Target Requests — GET the member's items; POST {tcin, op:add|remove} in the body.
   'collectify-custom': { path: '/collectify-custom', methods: ['GET', 'POST'], params: [] },
   // Requestable Target items catalog (shared tcins board) for the Custom Targets tab.
+  'collectify-delete-request': { path: '/collectify-delete-request', methods: ['GET', 'POST'], params: [] },
   'tcins':           { path: '/tcins',           methods: ['GET'],            params: [] },
   'round1-status': { path: '/round1-status', methods: ['GET'], params: [] },
   'clfy-acctgen-web': { path: '/clfy-acctgen-web', methods: ['POST'], params: [] },
@@ -78,7 +79,7 @@ export default async function handler(req, res) {
   for (const p of r.params) if (req.query[p] != null) qs.set(p, String(req.query[p]));
 
   const init = { method: req.method, signal: AbortSignal.timeout(15000) };
-  if (req.method === 'POST' && (route === 'imap-accounts' || route === 'collectify-custom' || route === 'faq-quiz-submit' || route === 'clfy-acctgen-web')) {
+  if (req.method === 'POST' && (route === 'imap-accounts' || route === 'collectify-custom' || route === 'faq-quiz-submit' || route === 'clfy-acctgen-web' || route === 'collectify-delete-request')) {
     init.headers = { 'Content-Type': 'application/json' };
     init.body = JSON.stringify(typeof req.body === 'object' && req.body ? req.body : {});
   }
