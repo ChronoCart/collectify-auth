@@ -49,7 +49,23 @@ export default async function handler(req, res) {
       sig,
     });
 
-        if (state === 'app') return res.redirect(`collectify://auth?${params}`);
+        // A Whop sign-in finishing its Discord link (auth.js put whop.js's signed token in the state): record
+    // whop_sub -> THIS Discord account on the bot, then hand the app the normal Discord session.
+    const linking = typeof state === 'string' && state.startsWith('app.link.');
+    if (linking) {
+      try {
+        const tok = state.slice('app.link.'.length); const [wp, wsig] = tok.split('.');
+        const enc2 = new TextEncoder(); const k2 = await crypto.subtle.importKey('raw', enc2.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+        const want = Array.from(new Uint8Array(await crypto.subtle.sign('HMAC', k2, enc2.encode(wp)))).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+        const w = want === wsig ? JSON.parse(Buffer.from(wp.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')) : null;
+        if (w && w.sub && Date.now() - (w.t || 0) < 30 * 60 * 1000) {
+          const botUrl = process.env.BOT_URL || process.env.CHECKOUT_BOT_URL, botSecret = process.env.API_SECRET || process.env.CHECKOUT_BOT_SECRET;
+          await fetch(`${botUrl}/clfy/whop-link?secret=${encodeURIComponent(botSecret)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sub: w.sub, discord_id: user.id, username: user.username, avatar: user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : '' }), signal: AbortSignal.timeout(8000) });
+        }
+      } catch (_) {}
+    }
+    if (state === 'app' || linking) return res.redirect(`collectify://auth?${params}`);
     res.redirect(`${process.env.FRONTEND_URL}/collectify-dashboard.html?${params}`);
   } catch (err) {
     console.error(err);
