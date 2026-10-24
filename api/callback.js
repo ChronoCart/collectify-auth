@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  const { code } = req.query;
+  const { code, state } = req.query;
   if (!code) return res.redirect(`${process.env.FRONTEND_URL}?error=no_code`);
   try {
     const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
@@ -49,6 +49,7 @@ export default async function handler(req, res) {
       sig,
     });
 
+        if (state === 'app') return res.redirect(`collectify://auth?${params}`);
     res.redirect(`${process.env.FRONTEND_URL}/collectify-dashboard.html?${params}`);
   } catch (err) {
     console.error(err);
