@@ -36,7 +36,7 @@ export default async function handler(req, res) {
   if (q.probe) return res.status(200).json({ configured: !!(clientId && process.env.WHOP_API_KEY) });
   if (!clientId) return res.status(503).json({ ok: false, error: 'Whop sign-in is not configured' });
   const redirectUri = selfUrl(req);
-  const fail = (why) => res.redirect(`collectify://auth?error=${encodeURIComponent(why)}`);
+  const fail = (why) => { console.warn('[whop] fail:', why); return res.redirect(`collectify://auth?error=${encodeURIComponent(why)}`); };
   // ── step 2: send to Whop ──
   if (!q.code) {
     const verifier = b64u(crypto.getRandomValues(new Uint8Array(32)));
@@ -52,7 +52,7 @@ export default async function handler(req, res) {
   const body = { grant_type: 'authorization_code', code: q.code, redirect_uri: redirectUri, client_id: clientId, code_verifier: st.v };
   if (process.env.WHOP_CLIENT_SECRET) body.client_secret = process.env.WHOP_CLIENT_SECRET;
   const tok = await fetch('https://api.whop.com/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (!tok.ok) return fail('token_failed');
+  if (!tok.ok) return fail('token_failed:' + tok.status + ' ' + (await tok.text().catch(() => '')).slice(0, 160));
   const { access_token } = await tok.json();
   const ui = await fetch('https://api.whop.com/oauth/userinfo', { headers: { Authorization: `Bearer ${access_token}` } });
   if (!ui.ok) return fail('userinfo_failed');
@@ -61,9 +61,12 @@ export default async function handler(req, res) {
   // ── membership: does this Whop user hold a valid membership with the Collectify business? ──
   let paid = false;
   try {
-    const r = await fetch(`https://api.whop.com/api/v1/memberships?user_id=${encodeURIComponent(me.sub)}&company_id=${encodeURIComponent(COMPANY)}&status=active`,
+    // measured 2026-10-25: `user_id=` and `status=` are IGNORED by this endpoint (any user, any status -> the first 100 of
+    // all 11.7k memberships, so the gate read as paid for everyone). `user_ids[]` + `statuses[]` filter; `first` is the page size.
+    const r = await fetch(`https://api.whop.com/api/v1/memberships?company_id=${encodeURIComponent(COMPANY)}&user_ids[]=${encodeURIComponent(me.sub)}&statuses[]=active&statuses[]=trialing&statuses[]=past_due&first=1`,
       { headers: { Authorization: `Bearer ${process.env.WHOP_API_KEY}` } });
-    if (r.ok) { const j = await r.json(); paid = Array.isArray(j.data) ? j.data.length > 0 : Array.isArray(j) ? j.length > 0 : false; }
+    if (r.ok) { const j = await r.json(); paid = Number(j.total_count) > 0 || (Array.isArray(j.data) && j.data.length > 0); }
+    else console.warn('[whop] memberships lookup', r.status);
   } catch (_) {}
   if (!st.app) return res.redirect(`${process.env.FRONTEND_URL}/collectify-dashboard.html?error=whop_app_only`);
   // ── hand the app a 30-minute Whop token + whatever Discord is already linked to this Whop user ──
