@@ -26,7 +26,7 @@ const ROUTES = {
   // Requestable Target items catalog (shared tcins board) for the Custom Targets tab.
   'collectify-delete-request': { path: '/collectify-delete-request', methods: ['GET', 'POST'], params: [] },
   // Collectify APP - ONE route dispatched on an `action` field (feed | prefs | report | push-token | mute).
-  'clfy/app': { path: '/clfy/app', methods: ['GET', 'POST'], params: ['action', 'limit'] },
+  'clfy/app': { path: '/clfy/app', methods: ['GET', 'POST'], params: ['action', 'limit', 'state'] },   // state: the map's stores action (2026-10-25)
   'tcins':           { path: '/tcins',           methods: ['GET'],            params: [] },
   'round1-status': { path: '/round1-status', methods: ['GET'], params: [] },
   'clfy-acctgen-web': { path: '/clfy-acctgen-web', methods: ['POST'], params: [] },
